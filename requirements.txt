@@ -1,0 +1,5 @@
+# 文件：app/requirements.txt
+watchdog==3.0.0
+PyYAML==6.0.1  # 官方已提供 musl wheel，兼容 Alpine
+httpx==0.27.0
+coloredlogs==15.0.1
