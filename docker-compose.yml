@@ -1,0 +1,15 @@
+version: "3.9"
+services:
+  emby-sync:
+    build: .
+    container_name: emby-sync
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "8080:8080"  # 前端 + 配置 API
+      - "8081:8081"  # 日志 WebSocket
+    volumes:
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+      - /volume1/cloudsync:/data/cloudsync:ro
