@@ -1,0 +1,21 @@
+emby:
+  host: "http://192.168.5.10:8096"
+  api_key: "99e3de0a4b0749a8b4ca4b70b0bd642a"
+  libraries:
+    华语剧集: "华语剧集"
+    华语电影: "华语电影"
+    日韩剧集: "日韩剧集"
+    日韩电影: "日韩电影"
+    欧美剧集: "欧美剧集"
+    欧美电影: "欧美电影"
+
+watch:
+  root_path: "/media"
+  cooldown_seconds: 30
+  suffix_whitelist: [".mkv", ".mp4", ".avi", ".mov", ".rmvb"]
+
+log:
+  level: "INFO"
+  file_path: "/app/logs/emby_sync.log"   # 容器内路径
+  max_bytes: 10485760                    # 10 MB
+  backup_count: 5                        # 最多 5 个轮转文件
