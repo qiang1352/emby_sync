@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-emby_sync 最终完整版
-- 监控 /media 目录及子目录
-- 支持目录/文件增删改事件
-- 日志轮转、文件过滤、冷却、无 RuntimeWarning
+emby_sync 最终可运行完整版
+- 监控 /media 及子目录
+- 支持目录/文件增删改
+- 日志轮转、冷却、文件过滤、路径映射、无 RuntimeWarning
 """
 
 import asyncio
@@ -26,7 +26,7 @@ from watchdog.observers import Observer
 CONFIG_FILE = "config/config.yaml"
 CN_TZ = pytz.timezone("Asia/Shanghai")
 
-# 全局：把 watchdog 线程任务安全地送回主事件循环
+# 全局：把 watchdog 线程任务安全送回主事件循环
 _TASK_QUEUE: asyncio.Queue = asyncio.Queue()
 
 
@@ -68,7 +68,6 @@ class Config:
                 raise FileNotFoundError(f"容器内目录不存在: {abs_path} ({name})")
 
 
-# --------------------------------------------------
 class EmbyClient:
     def __init__(self, host: str, api_key: str):
         self.host = host
@@ -109,13 +108,11 @@ class EventHandler(FileSystemEventHandler):
         return False
 
     def dispatch(self, event: FileSystemEvent):
-        # 打印所有事件，便于调试
         logger.debug("RAW_EVENT: %s %s is_dir=%s",
                      event.event_type, event.src_path, event.is_directory)
         if self._should_ignore(event):
             logger.debug("忽略文件：%s", event.src_path)
             return
-        # 忽略目录自身的 modified
         if event.is_directory and event.event_type == "modified":
             return
         path = Path(event.src_path)
@@ -136,7 +133,7 @@ class EventHandler(FileSystemEventHandler):
                 if rel_lib == top_dir:
                     return name
         except ValueError:
-            # 目录已被删除，走前缀匹配兜底
+            # 目录已被删除，用前缀兜底
             path_str = str(path)
             for name, rel_lib in self.config.libraries.items():
                 if path_str.startswith(str(Path(self.config.watch_root) / rel_lib)):
@@ -149,13 +146,21 @@ class EventHandler(FileSystemEventHandler):
             self.pending[lib_name] = now
             _TASK_QUEUE.put_nowait(self._batch_refresh())
 
+    async def _batch_refresh(self):
+        logger.debug("开始执行批量刷新任务")
+        await asyncio.sleep(self.config.cooldown)
+        libs = list(self.pending.keys())
+        for lib in libs:
+            await self.emby.refresh_library(lib)
+            self.pending.pop(lib, None)
+
 
 # --------------------------------------------------
 async def queue_worker():
-    """后台常驻：把队列里的协程丢回主事件循环"""
+    """常驻消费者：从线程安全队列取协程并调度"""
     while True:
         coro = await _TASK_QUEUE.get()
-        if coro is None:  # 优雅退出
+        if coro is None:
             break
         asyncio.create_task(coro)
 
@@ -188,7 +193,7 @@ async def main():
     logger = setup_logger(cfg)
     logger.info("emby_sync 启动成功，监控目录：%s", cfg.watch_root)
 
-    worker_task = asyncio.create_task(queue_worker())
+#    worker_task = asyncio.create_task(queue_worker())
 
     emby = EmbyClient(cfg.emby_host, cfg.emby_key)
     handler = EventHandler(cfg, emby)
@@ -196,16 +201,35 @@ async def main():
     observer.schedule(handler, cfg.watch_root, recursive=True)
     observer.start()
 
+    # 创建一个事件来处理优雅退出
+    stop_event = asyncio.Event()
+    
     try:
-        await asyncio.Event().wait()
+        while not stop_event.is_set():
+            # 检查队列是否有任务
+            try:
+                coro = _TASK_QUEUE.get_nowait()
+                asyncio.create_task(coro)
+            except asyncio.QueueEmpty:
+                pass  # 队列为空，继续等待
+
+            # 等待一小段时间，避免无限循环占用CPU
+            await asyncio.sleep(0.1)
+
     except KeyboardInterrupt:
         logger.info("收到退出信号，正在关闭...")
     finally:
         observer.stop()
         observer.join()
+        
+        # 确保队列中的最后一个任务被执行
+        while not _TASK_QUEUE.empty():
+            coro = _TASK_QUEUE.get_nowait()
+            await coro
+
         # 优雅关闭
-        await _TASK_QUEUE.put(None)
-        await worker_task
+        await emby.client.aclose()
+        logger.info("程序已安全退出。")
 
 
 if __name__ == "__main__":
