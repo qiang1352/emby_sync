@@ -96,6 +96,8 @@ class EventHandler(FileSystemEventHandler):
         self.config = config
         self.emby = emby
         self.pending: Dict[str, float] = defaultdict(float)
+        # 定义需要处理的事件类型
+        self.valid_events = {"created", "deleted", "modified", "moved"}
 
     def _should_ignore(self, event: FileSystemEvent) -> bool:
         if event.is_directory:
@@ -110,15 +112,24 @@ class EventHandler(FileSystemEventHandler):
     def dispatch(self, event: FileSystemEvent):
         logger.debug("RAW_EVENT: %s %s is_dir=%s",
                      event.event_type, event.src_path, event.is_directory)
+        
+        # 严格过滤事件类型 - 只处理有效事件
+        if event.event_type not in self.valid_events:
+            logger.debug("忽略事件类型: %s", event.event_type)
+            return
+            
         if self._should_ignore(event):
             logger.debug("忽略文件：%s", event.src_path)
             return
+            
+        # 忽略目录的修改事件（通常不需要刷新）
         if event.is_directory and event.event_type == "modified":
             return
+            
         path = Path(event.src_path)
         lib = self._match_library(path)
         if lib:
-            logger.info("检测到变化，计划刷新库【%s】：%s %s",
+            logger.info("检测到变化，计划刷新媒体库【%s】：%s %s",
                         lib, event.event_type, event.src_path)
             self._schedule_refresh(lib)
 
@@ -193,7 +204,9 @@ async def main():
     logger = setup_logger(cfg)
     logger.info("emby_sync 启动成功，监控目录：%s", cfg.watch_root)
 
-#    worker_task = asyncio.create_task(queue_worker())
+    # 提高 httpx 的日志级别，减少冗余日志
+    httpx_logger = logging.getLogger("httpx")
+    httpx_logger.setLevel(logging.WARNING)
 
     emby = EmbyClient(cfg.emby_host, cfg.emby_key)
     handler = EventHandler(cfg, emby)
