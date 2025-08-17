@@ -25,4 +25,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: qiang1352/emby:latest
+          tags: qiang1352/emby_sync:latest
